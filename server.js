@@ -191,10 +191,13 @@ class ChatManager {
     this.maintenanceMode = false;
     this.adminSockets = new Set();
     this.activityLog = [];
+    this.publicChatUsers = new Set();
+    this.publicChatMessages = [];
     this.stats = {
       totalMessages: 0,
       sessionsCreated: 0,
-      usersConnected: 0
+      usersConnected: 0,
+      publicChatMessages: 0
     };
   }
 
@@ -237,7 +240,9 @@ class ChatManager {
       activeUsers: io.sockets.sockets.size,
       waitingUsers: this.waitingUsers.size,
       activeSessions: this.activeSessions.size,
+      publicChatUsers: this.publicChatUsers.size,
       totalMessages: this.stats.totalMessages,
+      publicChatMessages: this.stats.publicChatMessages,
       sessionsCreated: this.stats.sessionsCreated,
       usersConnected: this.stats.usersConnected,
       uptime: process.uptime(),
@@ -341,6 +346,66 @@ class ChatManager {
       filtered = filtered.replace(regex, '*'.repeat(word.length));
     });
     return filtered;
+  }
+
+  // Public chat room methods
+  joinPublicChat(userId, userInfo) {
+    this.publicChatUsers.add(userId);
+    this.userSessions.set(userId, userInfo);
+    this.logActivity(`User ${userInfo.name} joined public chat`, 'public-chat');
+    
+    // Send recent messages to new user
+    const recentMessages = this.publicChatMessages.slice(-50); // Last 50 messages
+    return recentMessages;
+  }
+
+  leavePublicChat(userId) {
+    this.publicChatUsers.delete(userId);
+    const userInfo = this.userSessions.get(userId);
+    if (userInfo) {
+      this.logActivity(`User ${userInfo.name} left public chat`, 'public-chat');
+    }
+  }
+
+  addPublicChatMessage(userId, message) {
+    const userInfo = this.userSessions.get(userId);
+    if (!userInfo) return null;
+
+    const messageData = {
+      id: Date.now() + Math.random(),
+      userId,
+      username: userInfo.name,
+      message: this.filterMessage(message),
+      timestamp: new Date(),
+      type: 'message'
+    };
+
+    this.publicChatMessages.push(messageData);
+    this.stats.publicChatMessages++;
+    this.stats.totalMessages++;
+
+    // Keep only last 1000 messages
+    if (this.publicChatMessages.length > 1000) {
+      this.publicChatMessages = this.publicChatMessages.slice(-1000);
+    }
+
+    this.logActivity(`Public chat message from ${userInfo.name}`, 'public-chat');
+    return messageData;
+  }
+
+  getPublicChatUsers() {
+    const users = [];
+    this.publicChatUsers.forEach(userId => {
+      const userInfo = this.userSessions.get(userId);
+      if (userInfo) {
+        users.push({
+          id: userId,
+          name: userInfo.name,
+          joinedAt: userInfo.joinedAt
+        });
+      }
+    });
+    return users;
   }
 
   addWaitingUser(socketId, userInfo) {
@@ -485,6 +550,81 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Handle joining public chat
+  socket.on('join-public-chat', () => {
+    if (chatManager.maintenanceMode) {
+      socket.emit('error', { message: 'Site is under maintenance. Please try again later.' });
+      return;
+    }
+
+    const recentMessages = chatManager.joinPublicChat(socket.id, userInfo);
+    socket.join('public-chat');
+    
+    socket.emit('public-chat-joined', {
+      messages: recentMessages,
+      users: chatManager.getPublicChatUsers()
+    });
+
+    // Notify other users
+    socket.to('public-chat').emit('user-joined-public', {
+      userId: socket.id,
+      username: userInfo.name
+    });
+
+    // Update user count for all public chat users
+    io.to('public-chat').emit('public-chat-users', chatManager.getPublicChatUsers());
+  });
+
+  // Handle leaving public chat
+  socket.on('leave-public-chat', () => {
+    chatManager.leavePublicChat(socket.id);
+    socket.leave('public-chat');
+    
+    // Notify other users
+    socket.to('public-chat').emit('user-left-public', {
+      userId: socket.id,
+      username: userInfo.name
+    });
+
+    // Update user count
+    io.to('public-chat').emit('public-chat-users', chatManager.getPublicChatUsers());
+  });
+
+  // Handle public chat messages
+  socket.on('send-public-message', (data) => {
+    if (chatManager.maintenanceMode) {
+      socket.emit('error', { message: 'Site is under maintenance.' });
+      return;
+    }
+
+    const { message } = data;
+    
+    // Validate message
+    if (!message || message.trim().length === 0 || message.length > 500) {
+      socket.emit('error', { message: 'Invalid message' });
+      return;
+    }
+
+    // Check if user is in public chat
+    if (!chatManager.publicChatUsers.has(socket.id)) {
+      socket.emit('error', { message: 'You are not in the public chat' });
+      return;
+    }
+
+    // Check for banned content
+    if (chatManager.containsBannedContent(message)) {
+      socket.emit('error', { message: 'Message contains inappropriate content' });
+      chatManager.logActivity(`Inappropriate public message blocked from ${userInfo.name}`, 'moderation');
+      return;
+    }
+
+    const messageData = chatManager.addPublicChatMessage(socket.id, message.trim());
+    if (messageData) {
+      // Broadcast to all public chat users
+      io.to('public-chat').emit('public-message-received', messageData);
+    }
+  });
+
   // Handle sending messages
   socket.on('send-message', (data) => {
     if (chatManager.maintenanceMode) {
@@ -581,6 +721,16 @@ io.on('connection', (socket) => {
       if (userInfo) {
         chatManager.logActivity(`User ${userInfo.name} disconnected`, 'user');
       }
+    }
+    
+    // Handle public chat cleanup
+    if (chatManager.publicChatUsers.has(socket.id)) {
+      chatManager.leavePublicChat(socket.id);
+      socket.to('public-chat').emit('user-left-public', {
+        userId: socket.id,
+        username: userInfo?.name
+      });
+      io.to('public-chat').emit('public-chat-users', chatManager.getPublicChatUsers());
     }
     
     const sessionData = chatManager.getSession(socket.id);

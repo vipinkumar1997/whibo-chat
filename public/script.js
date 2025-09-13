@@ -13,20 +13,28 @@ const screens = {
     welcome: document.getElementById('welcomeScreen'),
     waiting: document.getElementById('waitingScreen'),
     chat: document.getElementById('chatScreen'),
+    publicChat: document.getElementById('publicChatScreen'),
     disconnected: document.getElementById('disconnectedScreen')
 };
 
 const elements = {
     startChatBtn: document.getElementById('startChatBtn'),
+    joinPublicChatBtn: document.getElementById('joinPublicChatBtn'),
     cancelWaitBtn: document.getElementById('cancelWaitBtn'),
     endChatBtn: document.getElementById('endChatBtn'),
+    leavePublicChatBtn: document.getElementById('leavePublicChatBtn'),
     newChatBtn: document.getElementById('newChatBtn'),
     backHomeBtn: document.getElementById('backHomeBtn'),
     messageInput: document.getElementById('messageInput'),
+    publicMessageInput: document.getElementById('publicMessageInput'),
     sendBtn: document.getElementById('sendBtn'),
+    sendPublicBtn: document.getElementById('sendPublicBtn'),
     chatMessages: document.getElementById('chatMessages'),
+    publicChatMessages: document.getElementById('publicChatMessages'),
     typingIndicator: document.getElementById('typingIndicator'),
     userName: document.getElementById('userName'),
+    publicUserCount: document.getElementById('publicUserCount'),
+    publicUsersList: document.getElementById('publicUsersList'),
     onlineCount: document.getElementById('onlineCount'),
     charCount: document.getElementById('charCount'),
     disconnectReason: document.getElementById('disconnectReason')
@@ -175,6 +183,27 @@ function sendMessage() {
     }
 }
 
+// Send public message function
+function sendPublicMessage() {
+    const message = elements.publicMessageInput.value.trim();
+    const validation = validateMessage(message);
+    
+    if (!validation.valid) {
+        showToast(validation.error, 'error');
+        return;
+    }
+    
+    // Send message via socket
+    socket.emit('send-public-message', {
+        message: message
+    });
+    
+    // Clear input
+    elements.publicMessageInput.value = '';
+    elements.sendPublicBtn.disabled = true;
+    document.getElementById('publicCharCount').textContent = '0';
+}
+
 function handleTyping() {
     if (!currentSession) return;
     
@@ -286,6 +315,19 @@ elements.backHomeBtn.addEventListener('click', () => {
     showScreen('welcome');
 });
 
+// Public chat event listeners
+elements.joinPublicChatBtn.addEventListener('click', () => {
+    socket.emit('join-public-chat');
+    showScreen('publicChat');
+});
+
+elements.leavePublicChatBtn.addEventListener('click', () => {
+    socket.emit('leave-public-chat');
+    showScreen('welcome');
+});
+
+elements.sendPublicBtn.addEventListener('click', sendPublicMessage);
+
 elements.sendBtn.addEventListener('click', sendMessage);
 
 elements.messageInput.addEventListener('input', (e) => {
@@ -311,6 +353,31 @@ elements.messageInput.addEventListener('keypress', (e) => {
 elements.messageInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
+    }
+});
+
+// Public message input handlers
+elements.publicMessageInput.addEventListener('input', (e) => {
+    const hasContent = e.target.value.trim().length > 0;
+    elements.sendPublicBtn.disabled = !hasContent;
+    
+    // Update character counter
+    const charCount = e.target.value.length;
+    document.getElementById('publicCharCount').textContent = charCount;
+    
+    if (charCount > 450) {
+        document.getElementById('publicCharCount').style.color = '#ef4444';
+    } else {
+        document.getElementById('publicCharCount').style.color = '#6b7280';
+    }
+});
+
+elements.publicMessageInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (!elements.sendPublicBtn.disabled) {
+            sendPublicMessage();
+        }
     }
 });
 
@@ -430,6 +497,83 @@ socket.on('receive-message', () => {
 });
 
 // Export for testing (if needed)
+// Public chat socket handlers
+socket.on('public-chat-joined', (data) => {
+    // Clear existing messages
+    elements.publicChatMessages.innerHTML = '<div class="system-message"><span class="system-icon">🎉</span>Welcome to the global chat room! Be respectful and have fun.</div>';
+    
+    // Add recent messages
+    data.messages.forEach(message => addPublicMessage(message, false));
+    
+    // Update users list
+    updatePublicUsersList(data.users);
+    
+    showToast('Joined public chat room!', 'success');
+});
+
+socket.on('public-message-received', (message) => {
+    addPublicMessage(message, false);
+});
+
+socket.on('public-chat-users', (users) => {
+    updatePublicUsersList(users);
+});
+
+socket.on('user-joined-public', (user) => {
+    showToast(`${user.username} joined the room`, 'info');
+});
+
+socket.on('user-left-public', (user) => {
+    showToast(`${user.username} left the room`, 'info');
+});
+
+// Public chat utility functions
+function addPublicMessage(message, isOwn = false) {
+    const messageEl = document.createElement('div');
+    messageEl.className = 'public-message';
+    
+    const time = new Date(message.timestamp).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+    
+    messageEl.innerHTML = `
+        <div class="public-message-header">
+            <span class="public-message-user">${sanitizeMessage(message.username)}</span>
+            <span class="public-message-time">${time}</span>
+        </div>
+        <div class="public-message-content">${sanitizeMessage(message.message)}</div>
+    `;
+    
+    if (isOwn) {
+        messageEl.classList.add('own-message');
+    }
+    
+    elements.publicChatMessages.appendChild(messageEl);
+    elements.publicChatMessages.scrollTop = elements.publicChatMessages.scrollHeight;
+}
+
+function updatePublicUsersList(users) {
+    const usersList = elements.publicUsersList;
+    usersList.innerHTML = '';
+    
+    users.forEach(user => {
+        const userEl = document.createElement('div');
+        userEl.className = 'user-item';
+        
+        const avatar = user.name.charAt(0).toUpperCase();
+        userEl.innerHTML = `
+            <div class="user-avatar">${avatar}</div>
+            <span>${sanitizeMessage(user.name)}</span>
+        `;
+        
+        usersList.appendChild(userEl);
+    });
+    
+    // Update user count
+    elements.publicUserCount.textContent = `${users.length} user${users.length !== 1 ? 's' : ''} online`;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         showScreen,

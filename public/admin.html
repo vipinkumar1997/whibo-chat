@@ -6,6 +6,7 @@
     <title>WhibO Admin Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="admin-styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
 </head>
 <body>
@@ -127,6 +128,32 @@
                 <div class="dashboard-grid">
                     <div class="dashboard-card">
                         <div class="card-header">
+                            <h3>📈 Real-time Statistics</h3>
+                            <button class="btn btn-sm btn-secondary" onclick="adminDashboard.resetCharts()">Reset</button>
+                        </div>
+                        <div class="card-content">
+                            <div class="chart-container">
+                                <canvas id="realTimeChart" width="400" height="200"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-card">
+                        <div class="card-header">
+                            <h3>🎯 Usage Distribution</h3>
+                            <select class="form-control" id="chartPeriod" onchange="adminDashboard.updateChartPeriod()">
+                                <option value="hour">Last Hour</option>
+                                <option value="day">Last Day</option>
+                                <option value="week">Last Week</option>
+                            </select>
+                        </div>
+                        <div class="card-content">
+                            <div class="chart-container">
+                                <canvas id="usageChart" width="400" height="200"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                             <h3>Recent Activity</h3>
                             <button class="card-action" id="refreshActivity">🔄</button>
                         </div>
@@ -366,6 +393,167 @@
 
     <!-- Scripts -->
     <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Chart.js Dashboard Configuration
+        const adminDashboard = {
+            charts: {},
+            
+            init() {
+                this.initializeCharts();
+                this.updateStats();
+                setInterval(() => this.updateStats(), 5000); // Update every 5 seconds
+            },
+            
+            initializeCharts() {
+                // Real-time Chart
+                const rtCtx = document.getElementById('realTimeChart').getContext('2d');
+                this.charts.realTime = new Chart(rtCtx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Active Users',
+                            data: [],
+                            borderColor: '#4F46E5',
+                            backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                            tension: 0.4
+                        }, {
+                            label: 'Messages/min',
+                            data: [],
+                            borderColor: '#10B981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            tension: 0.4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        },
+                        plugins: {
+                            legend: {
+                                position: 'top'
+                            }
+                        }
+                    }
+                });
+                
+                // Usage Distribution Chart
+                const usageCtx = document.getElementById('usageChart').getContext('2d');
+                this.charts.usage = new Chart(usageCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Private Chats', 'Public Rooms', 'Waiting Users'],
+                        datasets: [{
+                            data: [0, 0, 0],
+                            backgroundColor: [
+                                '#4F46E5',
+                                '#10B981',
+                                '#F59E0B'
+                            ],
+                            borderWidth: 2,
+                            borderColor: '#ffffff'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom'
+                            }
+                        }
+                    }
+                });
+            },
+            
+            updateStats() {
+                // Simulate real-time data (replace with actual socket data)
+                const now = new Date().toLocaleTimeString();
+                const activeUsers = Math.floor(Math.random() * 50) + 10;
+                const messagesPerMin = Math.floor(Math.random() * 20) + 5;
+                
+                // Update real-time chart
+                const rtChart = this.charts.realTime;
+                rtChart.data.labels.push(now);
+                rtChart.data.datasets[0].data.push(activeUsers);
+                rtChart.data.datasets[1].data.push(messagesPerMin);
+                
+                // Keep only last 10 data points
+                if (rtChart.data.labels.length > 10) {
+                    rtChart.data.labels.shift();
+                    rtChart.data.datasets[0].data.shift();
+                    rtChart.data.datasets[1].data.shift();
+                }
+                rtChart.update('none');
+                
+                // Update usage distribution
+                const privateChats = Math.floor(Math.random() * 20) + 5;
+                const publicRooms = Math.floor(Math.random() * 15) + 3;
+                const waitingUsers = Math.floor(Math.random() * 10) + 1;
+                
+                this.charts.usage.data.datasets[0].data = [privateChats, publicRooms, waitingUsers];
+                this.charts.usage.update();
+                
+                // Update stat cards
+                document.getElementById('onlineUsers').textContent = activeUsers;
+                document.getElementById('activeChats').textContent = privateChats;
+                document.getElementById('waitingUsers').textContent = waitingUsers;
+                document.getElementById('totalMessages').textContent = Math.floor(Math.random() * 1000) + 500;
+            },
+            
+            resetCharts() {
+                this.charts.realTime.data.labels = [];
+                this.charts.realTime.data.datasets[0].data = [];
+                this.charts.realTime.data.datasets[1].data = [];
+                this.charts.realTime.update();
+                
+                this.charts.usage.data.datasets[0].data = [0, 0, 0];
+                this.charts.usage.update();
+            },
+            
+            updateChartPeriod() {
+                const period = document.getElementById('chartPeriod').value;
+                // Update chart based on selected period
+                console.log('Chart period updated to:', period);
+                // Here you would fetch data for the selected period
+            },
+            
+            // Existing admin functions...
+            changeCredentials() {
+                const currentPassword = document.getElementById('currentPassword').value;
+                const newUsername = document.getElementById('newUsername').value;
+                const newPassword = document.getElementById('newPassword').value;
+                const confirmPassword = document.getElementById('confirmPassword').value;
+                
+                if (!currentPassword) {
+                    alert('Please enter your current password');
+                    return;
+                }
+                
+                if (newPassword && newPassword.length < 6) {
+                    alert('New password must be at least 6 characters long');
+                    return;
+                }
+                
+                if (newPassword && newPassword !== confirmPassword) {
+                    alert('New passwords do not match');
+                    return;
+                }
+                
+                // Here you would send the update request to the server
+                alert('Credentials update functionality will be implemented with server integration');
+            }
+        };
+        
+        // Initialize dashboard when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            adminDashboard.init();
+        });
+    </script>
     <script src="admin-script.js"></script>
 </body>
 </html>
